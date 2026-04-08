@@ -1,29 +1,36 @@
+from models.base import Base
+from models.document_models import Document
+
+import os
+import sys
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config
-from sqlalchemy import pool
-
+from sqlalchemy import engine_from_config, pool
 from alembic import context
+from dotenv import load_dotenv
 
-# this is the Alembic Config object, which provides
-# access to the values within the .ini file in use.
+
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, BASE_DIR)
+
+
+# 读取 Alembic 配置
+load_dotenv(os.path.join(BASE_DIR, ".env"))
 config = context.config
 
-# Interpret the config file for Python logging.
-# This line sets up loggers basically.
+# 关键：动态注入数据库连接字符串
+db_url = (f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}:"
+          f"{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}")
+config.set_main_option("sqlalchemy.url", db_url)
+
+print(f"--- DEBUG: Alembic 正在尝试连接: {db_url} ---")
+
+# 配置 Python 日志
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# add your model's MetaData object here
-# for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
-target_metadata = None
-
-# other values from the config, defined by the needs of env.py,
-# can be acquired:
-# my_important_option = config.get_main_option("my_important_option")
-# ... etc.
+# 关联数据库模型元数据
+target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
