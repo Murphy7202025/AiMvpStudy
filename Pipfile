@@ -8,6 +8,9 @@ fastapi = "*"
 uvicorn = "*"
 python-dotenv = "*"
 google-genai = "*"
+sqlalchemy = "*"
+alembic = "*"
+pgvector = "*"
 
 [dev-packages]
 
