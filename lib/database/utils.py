@@ -23,7 +23,7 @@ def database_url():
     host = os.getenv('DB_HOST')
     port = os.getenv('DB_PORT')
     db_name = os.getenv('DB_NAME')
-    return f"postgresql://{user}:{password}@{host}:{port}/{db_name}"
+    return f"postgresql+psycopg://{user}:{password}@{host}:{port}/{db_name}"
 
 
 # 1. 创建全局 Engine
@@ -54,7 +54,7 @@ def create_database_if_not_exists():
     port = os.getenv('DB_PORT')
 
     # 连接到系统默认的 'postgres' 数据库以执行建库指令
-    admin_url = f"postgresql://{user}:{password}@{host}:{port}/postgres"
+    admin_url = f"postgresql+psycopg://{user}:{password}@{host}:{port}/postgres"
 
     # isolation_level="AUTOCOMMIT" 是必须的，因为 PostgreSQL 不允许在事务中创建数据库
     temp_engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")

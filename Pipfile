@@ -11,7 +11,7 @@ google-genai = "*"
 sqlalchemy = "*"
 alembic = "*"
 pgvector = "*"
-psycopg2-binary = "*"
+psycopg = {extras = ["binary"], version = "*"}
 
 [dev-packages]
 
