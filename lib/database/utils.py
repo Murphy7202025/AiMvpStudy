@@ -1,8 +1,10 @@
-import os
-import logging
+from contextlib import contextmanager
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import scoped_session, sessionmaker
 from dotenv import load_dotenv
+
+import os
+import logging
 
 # 加载环境变量
 load_dotenv()
@@ -77,3 +79,27 @@ def create_database_if_not_exists():
         print(f"--- ❌ Error during database auto-creation: {e} ---")
     finally:
         temp_engine.dispose()
+
+
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+session_factory = scoped_session(SessionLocal)
+
+
+@contextmanager
+def session_scope():
+    """
+    提供一个事务范围的会话管理。
+    用法:
+        with session_scope() as session:
+            session.add(some_object)
+    """
+    # 创建一个具体的 session 实例
+    db_session = session_factory()
+    try:
+        yield db_session          # 将 session 交给 with 块内的代码使用
+        db_session.commit()       # 如果没报错，自动提交事务
+    except Exception as e:
+        db_session.rollback()     # 🚨 一旦 with 块内发生异常，立即自动回滚，保护数据库
+        raise e                # 将错误继续抛出，方便上层（如 FastAPI 拦截器）处理
+    finally:
+        db_session.close()
