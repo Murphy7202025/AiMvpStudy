@@ -10,23 +10,31 @@ load_dotenv()
 client = genai.Client()
 
 
-def get_text_embedding(text: str) -> list[float]:
+def get_text_embedding(text: str, is_query: bool = False, model="gemini-embedding-001") -> list[float]:
     """
-    调用 Gemini 接口，将文本转化为向量 (基于最新版 google-genai SDK)
+    调用 Gemini 接口，将文本转化为 768 维特征向量 (Embedding)。
+    内部自动应用了 MRL 降维策略，确保返回的向量维度与数据库表结构(768维)完美兼容。
+
+    :param text: 需要转化为向量的源文本。
+    :param is_query: 标识当前是否为“搜索提问”场景。
+                     - True: 针对用户输入的搜索问题，使用 RETRIEVAL_QUERY 优化检索意图。
+                     - False (默认): 针对存入知识库的文档资料，使用 RETRIEVAL_DOCUMENT 优化存储特征。
+    :param model: 使用的 Gemini 向量模型名称，默认为最新的原生多模态模型 "Gemini-embedding-001"。
+    :return: 包含 768 个浮点数的特征向量列表 (List[float])。
+    :raises Exception: 当 API 调用失败或网络异常时抛出。
     """
     try:
-        # 新版 SDK 的调用方式统一收口在 client.models 下
+        # 根据是否是查询，动态切换任务类型
+        current_task_type = "RETRIEVAL_QUERY" if is_query else "RETRIEVAL_DOCUMENT"
+
         response = client.models.embed_content(
-            model="text-embedding-004",
+            model=model,
             contents=text,
-            # 新版 SDK 使用强类型的 Config 对象来传递额外参数
             config=types.EmbedContentConfig(
-                task_type="RETRIEVAL_DOCUMENT"
+                task_type=current_task_type,
+                output_dimensionality=768
             )
         )
-
-        # 新版 SDK 的返回值是一个强类型对象，不再是普通字典
-        # 我们提取第一个 embedding 结果的 values 数组 (即 768 维的浮点数列表)
         return response.embeddings[0].values
 
     except Exception as e:

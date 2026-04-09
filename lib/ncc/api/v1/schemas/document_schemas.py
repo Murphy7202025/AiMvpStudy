@@ -39,3 +39,20 @@ class DocumentDetailResponse(BaseSchema):
 
         else:
             return None
+
+
+# --- 搜索请求体 ---
+class DocumentSearchRequest(BaseSchema):
+    """用于接收前端传来的搜索提问"""
+    query: str = Field(..., description="用户的搜索问题", min_length=1)
+
+    # ge=1 表示大于等于1，le=20 表示小于等于20。防止恶意请求拉爆数据库
+    top_k: int = Field(default=5, description="返回最相似的前几条结果", ge=1, le=20)
+
+
+# --- 搜索响应体 ---
+class DocumentSearchResult(BaseSchema):
+    """搜索接口返回的单条结果格式"""
+    id: int
+    content: str
+    distance: float = Field(..., description="向量余弦距离（值越小，代表语义越接近）")
