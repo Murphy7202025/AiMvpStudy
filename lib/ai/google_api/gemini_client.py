@@ -1,6 +1,9 @@
+from lib.utils import retry_request
+
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
+
 
 # 确保环境变量已加载
 load_dotenv()
@@ -10,6 +13,7 @@ load_dotenv()
 client = genai.Client()
 
 
+@retry_request()
 def get_text_embedding(text: str, is_query: bool = False, model="gemini-embedding-001") -> list[float]:
     """
     调用 Gemini 接口，将文本转化为 768 维特征向量 (Embedding)。
