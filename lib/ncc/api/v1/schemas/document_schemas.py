@@ -56,3 +56,14 @@ class DocumentSearchResult(BaseSchema):
     id: int
     content: str
     distance: float = Field(..., description="向量余弦距离（值越小，代表语义越接近）")
+
+
+# --- 问答请求体 ---
+class AskRequest(BaseSchema):
+    question: str = Field(..., description="用户的提问", min_length=1)
+
+
+# --- 问答响应体 ---
+class AskResponse(BaseSchema):
+    answer: str = Field(..., description="AI 基于知识库生成的回答")
+    sources: List[DocumentItem] = Field(..., description="AI 参考的原始文档片段")

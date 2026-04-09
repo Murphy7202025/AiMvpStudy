@@ -1,10 +1,8 @@
-from google.genai import types
-
 from lib.database.utils import session_scope
-from lib.ai.google_api.gemini_client import get_text_embedding, client
+from lib.ai.google_api.gemini_client import get_text_embedding, client, generate_answer_from_context
 from lib.database.utils import session
 from lib.ncc.api.v1.schemas.document_schemas import DocumentCreate, DocumentDetailResponse, DocumentSearchResult, \
-    DocumentSearchRequest
+    DocumentSearchRequest, AskResponse, AskRequest, DocumentItem
 from models.document_models import Document
 
 from fastapi import APIRouter, HTTPException
@@ -13,7 +11,7 @@ from typing import List
 
 DOCUMENTS = "documents"
 SEARCH = "search"
-
+ASK = "ask"
 
 v1_document_bp = APIRouter()
 
@@ -82,6 +80,51 @@ async def search_documents(payload: DocumentSearchRequest) -> List[DocumentSearc
             )
 
             return [DocumentSearchResult.model_validate(result) for result in results]
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@v1_document_bp.post(f"/{DOCUMENTS}/{ASK}", tags=[DOCUMENTS])
+async def ask_knowledge_base(payload: AskRequest) -> AskResponse:
+    """基于知识库的 AI 智能问答 (RAG 核心链路)"""
+    try:
+        print(f"--- 🧠 开始处理用户提问: {payload.question} ---")
+
+        # 1. 把用户的问题变成向量
+        query_vector = get_text_embedding(payload.question, is_query=True)
+
+        with session_scope() as db_session:
+            # 2. 从数据库搜出最相关的 3 条资料 (距离越小越好，限制距离在 0.6 以内保证相关性)
+            results = (
+                db_session.query(Document)
+                .order_by(Document.embedding.cosine_distance(query_vector))
+                .limit(3)
+                .all()
+            )
+
+            if not results:
+                return AskResponse(answer="抱歉，知识库中暂时没有相关资料。", sources=[])
+
+            # 3. 把搜出来的资料内容拼接成一大段文本
+            # 给每条资料加上序号，方便大模型阅读
+            context_text = "\n".join([f"资料 {i + 1}: {doc.content}" for i, doc in enumerate(results)])
+            print(f"--- 📚 检索到相关上下文，长度: {len(context_text)} 字符 ---")
+
+            # 4. 召唤大模型！生成最终回答
+            ai_answer = generate_answer_from_context(
+                question=payload.question,
+                context=context_text
+            )
+
+            # 5. 组装并返回（带着答案和参考来源）
+            # 使用我们之前写好的 Pydantic model_validate 来转换 ORM 对象
+            sources_list = [DocumentItem.model_validate(doc) for doc in results]
+
+            return AskResponse(
+                answer=ai_answer,
+                sources=sources_list
+            )
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
