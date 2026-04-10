@@ -1,9 +1,8 @@
 from lib.database.utils import session_scope
-from lib.ai.google_api.gemini_client import get_text_embedding, client, generate_answer_from_context
-from lib.database.utils import session
+from lib.ai.google_api.gemini_client import get_text_embedding, generate_answer_from_context
 from lib.ncc.api.v1.schemas.document_schemas import DocumentCreate, DocumentDetailResponse, DocumentSearchResult, \
-    DocumentSearchRequest, AskResponse, AskRequest, DocumentItem
-from models.document_models import Document
+    DocumentSearchRequest, AskResponse, AskRequest, DocumentChunkItem
+from models.document_models import Document, DocumentChunk
 
 from fastapi import APIRouter, HTTPException
 from typing import List
@@ -23,9 +22,7 @@ async def get_documents() -> List[DocumentDetailResponse]:
         with session_scope() as db_session:
             # SQLAlchemy 查询出来的是模型对象列表
             docs = db_session.query(Document).all()
-
             return [DocumentDetailResponse.model_validate(doc) for doc in docs]
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
@@ -34,18 +31,33 @@ async def get_documents() -> List[DocumentDetailResponse]:
 async def add_document(payload: DocumentCreate) -> DocumentDetailResponse:
     """新增文档并自动生成向量"""
     try:
-        print(f"--- ⏳ 正在为文本生成向量... ---")
-        vector = get_text_embedding(payload.content)
-        print(f"--- ✅ 向量生成成功，维度: {len(vector)} ---")
-
         with session_scope() as db_session:
+            # Save parent metadata first
             new_doc = Document(
-                content=payload.content,
-                embedding=vector
+                title=payload.title,
+                source=payload.source
             )
             db_session.add(new_doc)
-            db_session.flush()
-            db_session.refresh(new_doc)
+            db_session.flush()  # Get parent ID
+
+            # 简单的分块逻辑：按双换行符将全文切割成独立段落。
+            # 这能避免单次存入大段文本导致的语义稀释，是 RAG 优化的基础。
+            raw_chunks = [c.strip() for c in payload.content.split("\n\n") if c.strip()]
+
+            for i, text_segment in enumerate(raw_chunks):
+                print(f"--- ⏳ 正在为文本生成向量... ---")
+                vector = get_text_embedding(text_segment)
+                print(f"--- ✅ 向量生成成功，维度: {len(vector)} ---")
+
+                # Create chunks
+                chunk = DocumentChunk(
+                    document_id=new_doc.id,
+                    content=text_segment,
+                    content_length=len(text_segment),
+                    chunk_index=i,
+                    embedding=vector
+                )
+                db_session.add(chunk)
 
             # 返回字典，FastAPI 会根据 DocumentDetailResponse 自动校验和打包
             return DocumentDetailResponse.model_validate(new_doc)
@@ -67,13 +79,16 @@ async def search_documents(payload: DocumentSearchRequest) -> List[DocumentSearc
             # .cosine_distance() 是 pgvector 扩展专门为 SQLAlchemy 提供的方法
             results = (
                 db_session.query(
-                    Document.id,
-                    Document.content,
+                    DocumentChunk.id,
+                    DocumentChunk.content,
+                    DocumentChunk.document_id,
+                    Document.title.label("document_title"),  # Join parent title
                     # 计算当前文档与用户问题的余弦距离，并将其命名为 distance
-                    Document.embedding.cosine_distance(query_vector).label("distance")
+                    DocumentChunk.embedding.cosine_distance(query_vector).label("distance")
                 )
+                .join(Document, DocumentChunk.document_id == Document.id)
                 # 按距离从小到大排序（距离越小，语义越接近）
-                .order_by(Document.embedding.cosine_distance(query_vector))
+                .order_by(DocumentChunk.embedding.cosine_distance(query_vector))
                 # 限制返回条数
                 .limit(payload.top_k)
                 .all()
@@ -97,8 +112,8 @@ async def ask_knowledge_base(payload: AskRequest) -> AskResponse:
         with session_scope() as db_session:
             # 2. 从数据库搜出最相关的 3 条资料 (距离越小越好，限制距离在 0.6 以内保证相关性)
             results = (
-                db_session.query(Document)
-                .order_by(Document.embedding.cosine_distance(query_vector))
+                db_session.query(DocumentChunk)  # Changed from Document
+                .order_by(DocumentChunk.embedding.cosine_distance(query_vector))
                 .limit(3)
                 .all()
             )
@@ -119,7 +134,7 @@ async def ask_knowledge_base(payload: AskRequest) -> AskResponse:
 
             # 5. 组装并返回（带着答案和参考来源）
             # 使用我们之前写好的 Pydantic model_validate 来转换 ORM 对象
-            sources_list = [DocumentItem.model_validate(doc) for doc in results]
+            sources_list = [DocumentChunkItem.model_validate(doc) for doc in results]
 
             return AskResponse(
                 answer=ai_answer,
