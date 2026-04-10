@@ -52,7 +52,8 @@ class DocumentDetailResponse(BaseSchema):
     id: int
     title: Optional[str] = None
     source: Optional[str] = None
-    # Parent no longer has embedding
+    # 新增 content 作为预览字段
+    content: str = Field(default="", description="文档内容前缀(50字预览)")
 
 
 # --- 搜索请求体 ---

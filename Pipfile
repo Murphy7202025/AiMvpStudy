@@ -12,6 +12,7 @@ sqlalchemy = "*"
 alembic = "*"
 pgvector = "*"
 psycopg = {extras = ["binary"], version = "*"}
+langchain-text-splitters = "*"
 
 [dev-packages]
 
