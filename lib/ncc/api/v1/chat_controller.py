@@ -2,16 +2,14 @@ import os
 import asyncio
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
-from google import genai  # 使用最新版 google-genai
-from lib.database.utils import session  # 如果后续需要记录对话到数据库
+from lib.ai.google_api.gemini_client import client
+
 
 # 模仿 Flask Blueprint 命名
 v1_chat_bp = APIRouter()
 
-# 1. 初始化客户端 (异步模式需通过 client.aio 调用)
-client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-
 # 存储对话会话 (Session)
+# ⚠️ 注意：这是内存存储，服务重启后会话会丢失，后续需要迁移到 Redis
 chat_sessions = {}
 
 
@@ -23,7 +21,6 @@ async def chat(prompt: str, session_id: str = "default"):
     """
     model_name = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash")
 
-    # 2. 检查会话是否存在，不存在则创建
     if session_id not in chat_sessions:
         # 新 SDK 的异步写法：client.aio.chats.create
         chat_sessions[session_id] = client.aio.chats.create(model=model_name)
@@ -32,8 +29,6 @@ async def chat(prompt: str, session_id: str = "default"):
 
     async def event_generator():
         try:
-            # 3. 异步流式发送消息
-            # 注意：新 SDK 的返回对象本身就是异步迭代器
             response_stream = await chat_obj.send_message_stream(prompt)
 
             async for chunk in response_stream:

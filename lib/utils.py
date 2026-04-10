@@ -1,5 +1,6 @@
+import os
 import time
-from functools import wraps
+from functools import wraps, lru_cache
 from typing import Callable, Any
 
 
@@ -38,3 +39,12 @@ def retry_request(max_retries: int = 3, initial_delay: float = 1.0, backoff_fact
         return wrapper
 
     return decorator
+
+
+@lru_cache(maxsize=3)
+def get_model_name() -> str:
+    """
+    延迟读取模型名称，确保 load_dotenv() 执行后再取值。
+    使用 lru_cache 避免重复读取环境变量。
+    """
+    return os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash")

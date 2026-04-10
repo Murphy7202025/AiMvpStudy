@@ -1,9 +1,8 @@
-from lib.utils import retry_request
+from lib.utils import retry_request, get_model_name
 
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
-import os
 
 
 # 确保环境变量已加载
@@ -48,10 +47,12 @@ def get_text_embedding(text: str, is_query: bool = False, model="gemini-embeddin
 
 
 @retry_request()
-def generate_answer_from_context(question: str, context: str, model=os.getenv('GEMINI_MODEL_NAME')) -> str:
+def generate_answer_from_context(question: str, context: str, model: str = None) -> str:
     """
     根据提供的背景资料，调用 Gemini Flash 回答用户问题
     """
+    model = model or get_model_name()
+
     # 构建极其重要的 Prompt (提示词)
     prompt = f"""
         你是一个专业的知识库问答助手。请严格根据以下提供的【背景资料】来回答用户的【问题】。
