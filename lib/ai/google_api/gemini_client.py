@@ -137,3 +137,43 @@ def generate_answer_with_memory(question: str, context: str, history: list, mode
     except Exception as e:
         print(f"--- ❌ 多轮对话生成失败: {e} ---")
         raise e
+
+
+def format_chat_history(history: list) -> list[types.Content]:
+    """将数据库字典格式转换为 Gemini SDK 原生 Content 对象"""
+    return [
+        types.Content(
+            role=msg["role"],
+            parts=[types.Part.from_text(text=msg["parts"][0])]
+        ) for msg in history
+    ]
+
+
+# --- 辅助函数：Prompt 拼装 ---
+def build_rag_prompt(question: str, context: str) -> str:
+    """根据是否拥有上下文，动态生成 Prompt"""
+    if not context:
+        return question
+    return f"检索到的参考资料：\n{context}\n\n结合资料和历史对话，回答：{question}"
+
+
+# --- 主调用函数 ---
+@retry_request()
+def generate_answer_with_memory(question: str, context: str, history: list, model: str = None) -> str:
+    """企业级多轮对话生成器（严格限制行数）"""
+    sys_instruct = (
+        "你是企业级知识库助手。优先使用'参考资料'回答。"
+        "资料不足时结合前文对话和常识。保持专业客观。"
+    )
+
+    chat = client.chats.create(
+        model=model or get_model_name(),
+        config=types.GenerateContentConfig(
+            system_instruction=sys_instruct,
+            temperature=0.3,
+        ),
+        history=format_chat_history(history)
+    )
+
+    response = chat.send_message(build_rag_prompt(question, context))
+    return response.text

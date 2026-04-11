@@ -13,6 +13,8 @@ alembic = "*"
 pgvector = "*"
 psycopg = {extras = ["binary"], version = "*"}
 langchain-text-splitters = "*"
+pymupdf = "*"
+python-multipart = "*"
 
 [dev-packages]
 

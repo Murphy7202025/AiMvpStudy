@@ -5,15 +5,16 @@ from lib.database.utils import get_db
 from lib.ai.google_api.gemini_client import get_text_embedding, generate_answer_from_context
 from lib.ncc.api.v1.schemas.document_schemas import DocumentCreate, DocumentDetailResponse, DocumentSearchResult, \
     DocumentSearchRequest, AskResponse, AskRequest, DocumentChunkItem
+from lib.ncc.services.document_services import process_and_store_document, get_document_preview
 from models.document_models import Document, DocumentChunk
 
-from fastapi import APIRouter, HTTPException, Depends
-from typing import List
-
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
+from typing import List, Optional
 
 DOCUMENTS = "documents"
 SEARCH = "search"
 ASK = "ask"
+UPLOAD = "upload"
 
 v1_document_bp = APIRouter()
 
@@ -27,19 +28,12 @@ async def get_documents(session: Session = Depends(get_db)) -> List[DocumentDeta
 
         result_list = []
         for doc in docs:
-            preview = ""
-            # 2. 如果该文档有内容切片，找到第一片 (chunk_index=0)
-            if doc.chunks:
-                # 确保按照 chunk_index 排序，拿到真正的文章开头
-                first_chunk = next((c for c in doc.chunks if c.chunk_index == 0), doc.chunks[0])
-                # 3. 截取前 50 个字符，超出的部分加上省略号
-                preview = first_chunk.content[:50] + "..." if len(first_chunk.content) > 50 else first_chunk.content
-            # 4. 手动组装响应对象
+            # 2. 手动组装响应对象
             result_list.append(DocumentDetailResponse(
                 id=doc.id,
                 title=doc.title,
                 source=doc.source,
-                content=preview
+                content=get_document_preview(doc)
             ))
 
         return result_list
@@ -183,5 +177,29 @@ async def ask_knowledge_base(payload: AskRequest, session: Session = Depends(get
             sources=sources_list
         )
 
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@v1_document_bp.post(f"/{DOCUMENTS}/{UPLOAD}", tags=[DOCUMENTS])
+async def upload_document(
+    file: UploadFile = File(...),
+    title: Optional[str] = Form(None, description="可选文档标题，不传则从文件名提取"),
+    session: Session = Depends(get_db)
+) -> DocumentDetailResponse:
+    """文档上传解析与自动切片向量化 (支持 PDF/TXT)"""
+    try:
+        # 1. 传入 file 和 title，交给 Service 层处理
+        new_doc = await process_and_store_document(session, file, custom_title=title)
+
+        # 2. 构造响应对象
+        response_data = DocumentDetailResponse.model_validate(new_doc)
+
+        # 3. 提取第一块作为内容预览
+        response_data.content = get_document_preview(new_doc)
+        return response_data
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
