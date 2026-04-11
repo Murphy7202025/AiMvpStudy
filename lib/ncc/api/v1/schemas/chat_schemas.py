@@ -15,5 +15,3 @@ class ChatResponse(BaseSchema):
     """后端的聊天响应"""
     session_id: int = Field(..., description="当前的会话ID，前端需保存以便发下一句")
     answer: str = Field(..., description="AI 的回答")
-    # 保留 RAG 的参考来源溯源能力
-    sources: List[DocumentChunkItem] = Field(default=[], description="AI 此次回答参考的内部知识库文档")

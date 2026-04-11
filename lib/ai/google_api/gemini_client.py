@@ -185,21 +185,15 @@ def build_rag_prompt(question: str, context: str) -> str:
 
 # --- 主调用函数 ---
 @retry_request()
-def generate_answer_with_memory(question: str, context: str, history: list, model: str = None) -> str:
-    """企业级多轮对话生成器（严格限制行数）"""
-    sys_instruct = (
-        "你是企业级知识库助手。优先使用'参考资料'回答。"
-        "资料不足时结合前文对话和常识。保持专业客观。"
-    )
-
+def generate_answer_with_memory(question: str, history: list, model: str = None) -> str:
+    """基础Chat生成器"""
     chat = client.chats.create(
         model=model or get_model_name(),
         config=types.GenerateContentConfig(
-            system_instruction=sys_instruct,
             temperature=0.3,
         ),
         history=format_chat_history(history)
     )
 
-    response = chat.send_message(build_rag_prompt(question, context))
+    response = chat.send_message(question)
     return response.text

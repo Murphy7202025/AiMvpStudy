@@ -18,14 +18,12 @@ async def chat_with_memory_and_rag(payload: ChatRequest, db: Session = Depends(g
         session_id = get_or_create_session(db, payload.session_id, payload.message)
         save_message(db, session_id, "user", payload.message)
 
-        # 2. Load Memory & Knowledge
+        # 2. Load Memory
         history = get_formatted_history(db, session_id, limit=10)
-        context, sources = get_rag_context(db, payload.message)
 
         # 3. AI Generation
         ai_answer = generate_answer_with_memory(
             question=payload.message,
-            context=context,
             history=history[:-1]  # 排除当前提问，防止 Gemini 报错重复
         )
 
@@ -33,11 +31,7 @@ async def chat_with_memory_and_rag(payload: ChatRequest, db: Session = Depends(g
         save_message(db, session_id, "model", ai_answer)
         db.commit()
 
-        return ChatResponse(
-            session_id=session_id,
-            answer=ai_answer,
-            sources=sources
-        )
+        return ChatResponse(session_id=session_id, answer=ai_answer)
 
     except HTTPException:
         raise
