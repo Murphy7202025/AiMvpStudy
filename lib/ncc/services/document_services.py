@@ -1,14 +1,13 @@
-import os
-import re
-from typing import Optional, Type
+from models.document_models import Document, DocumentChunk
+from lib.ai.google_api.gemini_client import get_text_embedding
 
-import fitz
 from fastapi import UploadFile, HTTPException
 from sqlalchemy.orm import Session
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-
-from models.document_models import Document, DocumentChunk
-from lib.ai.google_api.gemini_client import get_text_embedding
+from typing import Optional, Type
+import os
+import re
+import fitz
 
 
 # --- 1. 原子工具：PDF 文本提取 ---
@@ -127,3 +126,56 @@ def get_document_preview(document: [Document, Type[Document]], max_length: int =
         return content[:max_length] + "..."
 
     return content
+
+
+def get_similar_chunks_with_distance(db: Session, query_vector: list[float], limit: int = 3):
+    """
+    核心查询工具：根据向量搜索相似的文档切片，并附带余弦距离。
+    专门供 /ask 接口做阈值判断使用。
+    """
+    return (
+        db.query(
+            DocumentChunk,
+            DocumentChunk.embedding.cosine_distance(query_vector).label("distance")
+        )
+        .order_by("distance")
+        .limit(limit)
+        .all()
+    )
+
+
+def search_documents_by_vector(db: Session, query_vector: list[float], limit: int = 5):
+    """
+    [Public] 核心查询工具：跨表联查文档和切片。
+    专门供前端 /search 搜索列表展示使用。
+    """
+    results = (
+        db.query(
+            DocumentChunk.id,
+            DocumentChunk.content,
+            DocumentChunk.document_id,
+            Document.title.label("document_title"),  # Join parent title
+            # 计算当前文档与用户问题的余弦距离，并将其命名为 distance
+            DocumentChunk.embedding.cosine_distance(query_vector).label("distance")
+        )
+        .join(Document, DocumentChunk.document_id == Document.id)
+        # 按距离从小到大排序（距离越小，语义越接近）
+        .order_by(DocumentChunk.embedding.cosine_distance(query_vector))
+        # 限制返回条数
+        .limit(limit)
+        .all()
+    )
+
+    return results
+
+
+def get_top_chunk_with_score(db: Session, query_vector: list[float]):
+    """[Public] 获取最匹配的一个分块及其距离，用于 Agent 决策"""
+    return (
+        db.query(
+            DocumentChunk,
+            DocumentChunk.embedding.cosine_distance(query_vector).label("distance")
+        )
+        .order_by("distance")
+        .first()  # 只取第一名，用于快速判断阈值
+    )

@@ -1,20 +1,23 @@
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from sqlalchemy.orm import selectinload, Session
-
 from lib.database.utils import get_db
-from lib.ai.google_api.gemini_client import get_text_embedding, generate_answer_from_context
+from lib.ai.google_api.gemini_client import get_text_embedding, generate_answer_from_context, \
+    generate_answer_with_search
 from lib.ncc.api.v1.schemas.document_schemas import DocumentCreate, DocumentDetailResponse, DocumentSearchResult, \
     DocumentSearchRequest, AskResponse, AskRequest, DocumentChunkItem
-from lib.ncc.services.document_services import process_and_store_document, get_document_preview
+from lib.ncc.services.document_services import process_and_store_document, get_document_preview, \
+    get_similar_chunks_with_distance, get_top_chunk_with_score, search_documents_by_vector
 from models.document_models import Document, DocumentChunk
 
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from sqlalchemy.orm import selectinload, Session
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
 from typing import List, Optional
+
 
 DOCUMENTS = "documents"
 SEARCH = "search"
 ASK = "ask"
 UPLOAD = "upload"
+RESEARCH = "research"
 
 v1_document_bp = APIRouter()
 
@@ -114,22 +117,7 @@ async def search_documents(payload: DocumentSearchRequest, session: Session = De
 
         # 2. 数据库魔法时刻：使用 pgvector 的余弦距离进行排序
         # .cosine_distance() 是 pgvector 扩展专门为 SQLAlchemy 提供的方法
-        results = (
-            session.query(
-                DocumentChunk.id,
-                DocumentChunk.content,
-                DocumentChunk.document_id,
-                Document.title.label("document_title"),  # Join parent title
-                # 计算当前文档与用户问题的余弦距离，并将其命名为 distance
-                DocumentChunk.embedding.cosine_distance(query_vector).label("distance")
-            )
-            .join(Document, DocumentChunk.document_id == Document.id)
-            # 按距离从小到大排序（距离越小，语义越接近）
-            .order_by(DocumentChunk.embedding.cosine_distance(query_vector))
-            # 限制返回条数
-            .limit(payload.top_k)
-            .all()
-        )
+        results = search_documents_by_vector(session, query_vector, payload.top_k)
 
         return [DocumentSearchResult.model_validate(result) for result in results]
 
@@ -176,6 +164,36 @@ async def ask_knowledge_base(payload: AskRequest, session: Session = Depends(get
             answer=ai_answer,
             sources=sources_list
         )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@v1_document_bp.post(f"/{DOCUMENTS}/{RESEARCH}", tags=[DOCUMENTS])
+async def ask_knowledge_base(payload: AskRequest, session: Session = Depends(get_db)) -> AskResponse:
+    """智能体接口：优先本地知识库，不匹配则自动联网搜索"""
+    try:
+        query_vector = get_text_embedding(payload.question, is_query=True)
+        # 1. 快速获取最相关的本地资料
+        top_match = get_top_chunk_with_score(session, query_vector)
+
+        # 2. 决策路由：如果距离 > 0.6 或 根本没数据，直接走联网模式
+        if not top_match or top_match.distance > 0.6:
+            print(f"--- 🌐 Agent 决策：本地知识距离 {top_match.distance if top_match else 'N/A'} 过远，联网搜索 ---")
+            answer = generate_answer_with_search(payload.question, context="")
+            return AskResponse(answer=answer, sources=[])
+
+        # 3. 命中本地逻辑：获取前 3 条并生成回答
+        print(f"--- 📚 Agent 决策：本地命中 (Distance: {top_match.distance}) ---")
+        results = get_similar_chunks_with_distance(session, query_vector, limit=3)
+        chunks = [row[0] for row in results]
+        context = "\n".join([f"资料: {c.content}" for c in chunks])
+
+        # 既然是 Agent，本地回答也可以用 search 函数来增强表现力
+        answer = generate_answer_with_search(payload.question, context=context)
+        sources = [DocumentChunkItem.model_validate(c) for c in chunks]
+
+        return AskResponse(answer=answer, sources=sources)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
