@@ -4,7 +4,7 @@ from sqlalchemy import BigInteger, Text, VARCHAR, Boolean, Integer, ForeignKey
 from typing import List
 
 
-class ChatSession(Base, BlameMixin):
+class ChatSession(Base, BlameMixin, DeletableMixin):
     """
     Chat Session Model: represents a single conversation thread.
     """
@@ -12,7 +12,6 @@ class ChatSession(Base, BlameMixin):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     title: Mapped[str] = mapped_column(VARCHAR(255), nullable=True)
-    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # One-to-Many relationship with messages
     # cascade="all, delete-orphan" Ensures physical deletion cleans up child rows if needed
@@ -49,8 +48,6 @@ class ChatMessage(Base, BlameMixin, DeletableMixin):
 
     # For cost and context window tracking
     token_count: Mapped[int] = mapped_column(Integer, nullable=True)
-
-    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # Back reference to the parent session
     session: Mapped["ChatSession"] = relationship("ChatSession", back_populates="messages")
