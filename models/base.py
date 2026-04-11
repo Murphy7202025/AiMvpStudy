@@ -26,3 +26,11 @@ class BlameMixin:
         self.created_at = None
         self.updated_by = None
         self.updated_at = None
+
+
+class DeletableMixin:
+    """
+    Adds soft delete columns to models.
+    """
+    deleted_at = sa.Column(sa.DateTime, nullable=True)
+    deleted_by = sa.Column(sa.Unicode(100), nullable=True)
