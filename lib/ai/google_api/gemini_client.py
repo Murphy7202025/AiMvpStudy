@@ -104,67 +104,6 @@ def generate_answer_with_search(question: str, context: str = "", model: str = N
         raise e
 
 
-@retry_request()
-def generate_answer_with_memory(question: str, context: str, history: list, model: str = None) -> str:
-    """
-    企业级多轮对话生成器：融合 RAG 上下文与短期记忆
-    :param question: 用户当前的最新提问
-    :param context: 从向量数据库检索出的文本（如果没有则为空字符串）
-    :param history: 格式化后的历史对话列表 [{"role": "user", "parts": ["..."]}, ...]
-    :param model: 使用的 Gemini 模型名称，默认从配置获取
-    :return: AI 生成的回答文本
-    """
-    model = model or get_model_name()
-
-    try:
-        # 1. 转换历史记录格式
-        # 严格遵守 google-genai SDK 规范，将普通字典转换为 types.Content 对象
-        formatted_history = []
-        for msg in history:
-            formatted_history.append(
-                types.Content(
-                    role=msg["role"],
-                    parts=[types.Part.from_text(text=msg["parts"][0])]
-                )
-            )
-
-        # 2. 设置系统人设 (System Instruction)
-        # 规定 AI 的行为边界和回答偏好
-        sys_instruct = (
-            "你是一个专业的企业级知识库与业务助手。请结合上下文和历史对话回答问题。\n"
-            "要求：\n"
-            "1. 优先使用'参考资料'中的信息来回答。\n"
-            "2. 如果参考资料无法完全涵盖，请结合你的常识和前文对话回答。\n"
-            "3. 保持专业、客观的语气。"
-        )
-
-        # 3. 动态组装当前 Prompt
-        # 将 RAG 检索到的内容作为“外挂插件”悄悄放在用户问题的前面
-        current_prompt = question
-        if context:
-            current_prompt = f"以下是系统刚刚为你检索到的内部参考资料：\n{context}\n\n基于以上资料和我们的历史对话，请回答我的问题：{question}"
-
-        # 4. 实例化自带记忆的 Chat Session
-        chat = client.chats.create(
-            model=model,
-            config=types.GenerateContentConfig(
-                system_instruction=sys_instruct,
-                temperature=0.3,  # 降低发散性，保证 RAG 问答的严谨度
-            ),
-            history=formatted_history
-        )
-
-        # 5. 发送请求
-        # print(f"--- 🤖 正在调用 Gemini，当前附带了 {len(formatted_history)} 条历史记忆 ---")
-        response = chat.send_message(current_prompt)
-
-        return response.text
-
-    except Exception as e:
-        print(f"--- ❌ 多轮对话生成失败: {e} ---")
-        raise e
-
-
 def format_chat_history(history: list) -> list[types.Content]:
     """将数据库字典格式转换为 Gemini SDK 原生 Content 对象"""
     return [
@@ -197,3 +136,23 @@ def generate_answer_with_memory(question: str, history: list, model: str = None)
 
     response = chat.send_message(question)
     return response.text
+
+
+async def generate_answer_with_memory_stream(
+    question: str,
+    history: list,
+    model: str = None
+):
+    """流式多轮对话生成器，返回异步生成器"""
+    chat = client.aio.chats.create(
+        model=model or get_model_name(),
+        config=types.GenerateContentConfig(
+            temperature=0.3,
+        ),
+        history=format_chat_history(history)
+    )
+
+    response_stream = await chat.send_message_stream(question)
+    async for chunk in response_stream:
+        if chunk.text:
+            yield chunk.text
