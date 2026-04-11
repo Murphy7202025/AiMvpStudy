@@ -1,44 +1,53 @@
-import os
-import asyncio
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from lib.ai.google_api.gemini_client import client
+from sqlalchemy.orm import Session
+
+from lib.database.utils import get_db
+from lib.ai.google_api.gemini_client import generate_answer_with_memory_stream
+from lib.ncc.api.v1.schemas.chat_schemas import ChatRequest
+from lib.ncc.services.chat_services import get_or_create_session, save_message, get_formatted_history
+
+import json
+import asyncio
 
 
-# 模仿 Flask Blueprint 命名
 v1_chat_bp = APIRouter()
 
-# 存储对话会话 (Session)
-# ⚠️ 注意：这是内存存储，服务重启后会话会丢失，后续需要迁移到 Redis
-chat_sessions = {}
 
+@v1_chat_bp.post("/chat", tags=["Chat"])
+async def chat_with_memory_and_rag(
+    payload: ChatRequest,
+    db: Session = Depends(get_db)
+):
+    """流式聊天接口：SSE 格式逐字输出"""
+    try:
+        session_id = get_or_create_session(db, payload.session_id, payload.message)
+        save_message(db, session_id, "user", payload.message)
+        history = get_formatted_history(db, session_id, limit=10)
+        db.commit()
 
-@v1_chat_bp.get("/chat", tags=["AI Chat"])
-async def chat(prompt: str, session_id: str = "default"):
-    """
-    使用最新版 google-genai SDK 的异步流式接口
-    访问路径：/api/v1/chat
-    """
-    model_name = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash")
+        full_answer = []
 
-    if session_id not in chat_sessions:
-        # 新 SDK 的异步写法：client.aio.chats.create
-        chat_sessions[session_id] = client.aio.chats.create(model=model_name)
+        async def event_generator():
+            # 先把 session_id 发给前端
+            yield f"data: {json.dumps({'type': 'session', 'session_id': session_id})}\n\n"
 
-    chat_obj = chat_sessions[session_id]
+            async for chunk in generate_answer_with_memory_stream(
+                question=payload.message,
+                history=history[:-1]
+            ):
+                full_answer.append(chunk)
+                yield f"data: {json.dumps({'type': 'text', 'content': chunk})}\n\n"
+                await asyncio.sleep(0.1)
 
-    async def event_generator():
-        try:
-            response_stream = await chat_obj.send_message_stream(prompt)
+            # 流结束后保存完整回答
+            save_message(db, session_id, "model", "".join(full_answer))
+            db.commit()
 
-            async for chunk in response_stream:
-                if chunk.text:
-                    # 按照 SSE 格式返回
-                    yield f"data: {chunk.text}\n\n"
-                    # 给前端留一点渲染时间，模拟打字机
-                    await asyncio.sleep(0.01)
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
-        except Exception as e:
-            yield f"data: [Error]: {str(e)}\n\n"
+        return StreamingResponse(event_generator(), media_type="text/event-stream")
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))

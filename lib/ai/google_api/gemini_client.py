@@ -76,3 +76,83 @@ def generate_answer_from_context(question: str, context: str, model: str = None)
     except Exception as e:
         print(f"--- ❌ 生成回答失败: {e} ---")
         raise e
+
+
+@retry_request()
+def generate_answer_with_search(question: str, context: str = "", model: str = None) -> str:
+    """智能体问答：带联网搜索能力的生成器"""
+    model = model or get_model_name()
+
+    # 如果有本地 context，就让它结合；如果没有，就纯靠自己和联网
+    prompt_text = question
+    if context:
+        prompt_text = f"参考资料：\n{context}\n\n基于资料，并结合你的知识或联网搜索，回答：{question}"
+
+    try:
+        response = client.models.generate_content(
+            model=model,
+            contents=prompt_text,
+            config=types.GenerateContentConfig(
+                temperature=0.4,
+                # 💡 核心魔法：直接赋予大模型谷歌搜索的能力！
+                tools=[{"google_search": {}}],
+            )
+        )
+        return response.text
+    except Exception as e:
+        print(f"--- ❌ 联网生成回答失败: {e} ---")
+        raise e
+
+
+def format_chat_history(history: list) -> list[types.Content]:
+    """将数据库字典格式转换为 Gemini SDK 原生 Content 对象"""
+    return [
+        types.Content(
+            role=msg["role"],
+            parts=[types.Part.from_text(text=msg["parts"][0])]
+        ) for msg in history
+    ]
+
+
+# --- 辅助函数：Prompt 拼装 ---
+def build_rag_prompt(question: str, context: str) -> str:
+    """根据是否拥有上下文，动态生成 Prompt"""
+    if not context:
+        return question
+    return f"检索到的参考资料：\n{context}\n\n结合资料和历史对话，回答：{question}"
+
+
+# --- 主调用函数 ---
+@retry_request()
+def generate_answer_with_memory(question: str, history: list, model: str = None) -> str:
+    """基础Chat生成器"""
+    chat = client.chats.create(
+        model=model or get_model_name(),
+        config=types.GenerateContentConfig(
+            temperature=0.3,
+        ),
+        history=format_chat_history(history)
+    )
+
+    response = chat.send_message(question)
+    return response.text
+
+
+async def generate_answer_with_memory_stream(
+    question: str,
+    history: list,
+    model: str = None
+):
+    """流式多轮对话生成器，返回异步生成器"""
+    chat = client.aio.chats.create(
+        model=model or get_model_name(),
+        config=types.GenerateContentConfig(
+            temperature=0.3,
+        ),
+        history=format_chat_history(history)
+    )
+
+    response_stream = await chat.send_message_stream(question)
+    async for chunk in response_stream:
+        if chunk.text:
+            yield chunk.text
