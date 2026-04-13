@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # 初始化全新版 Gemini 客户端
-# 💡 贴心特性：只要你的 .env 里配置了 GEMINI_API_KEY，Client() 会自动读取，不需要手动传参了
+# 💡 贴心特性：.env 里配置了 GEMINI_API_KEY，Client() 会自动读取，不需要手动传参了
 client = genai.Client()
 
 

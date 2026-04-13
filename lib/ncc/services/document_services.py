@@ -83,7 +83,6 @@ async def process_and_store_document(db: Session, file: UploadFile, custom_title
     # 如果前端传了 title 并且不为空白，就用用户的；否则智能提取
     final_title = custom_title if custom_title and custom_title.strip() else generate_default_title(filename)
 
-    # 满足你的需求：source 直接使用原始文件名
     doc_source = filename
 
     # --- 2. 策略模式：读取文本 ---
@@ -95,7 +94,6 @@ async def process_and_store_document(db: Session, file: UploadFile, custom_title
         raise HTTPException(status_code=400, detail="目前仅支持 PDF 和 TXT 格式")
 
     # --- 3. 切片与入库 ---
-    # 假设你之前已经写好了 split_text_into_chunks 函数
     chunks = split_text_into_chunks(full_text)
 
     # 传入确定的 final_title 和 doc_source

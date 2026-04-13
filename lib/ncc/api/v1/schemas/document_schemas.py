@@ -19,7 +19,6 @@ class DocumentChunkItem(BaseSchema):
     chunk_index: int
     content_length: Optional[int] = None
 
-    # 将你之前的 embedding 预览逻辑保留到这里 (Moved from parent)
     embedding: Optional[List[float]] = Field(
         None,
         description="向量的前20个维度预览",
