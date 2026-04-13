@@ -71,8 +71,7 @@ def session_scope():
 
 
 # 5. 线程安全 Session (备用方案)
-# 如果你有些旧代码必须直接调用全局对象，保留这个 scoped_session
-# 但请注意：在 FastAPI 的 async 函数中尽量避免直接使用它
+# 请注意：在 FastAPI 的 async 函数中尽量避免直接使用它
 session = scoped_session(SessionLocal)
 
 
